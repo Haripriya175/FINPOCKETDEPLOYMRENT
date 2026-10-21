@@ -1,0 +1,79 @@
+version: '3.8'
+
+# ==============================================================================
+# FinPocket Staging Docker Compose Configuration
+# ==============================================================================
+
+services:
+  # 1. PostgreSQL 18 Relational Store
+  finpocket-postgres:
+    image: postgres:18-alpine
+    container_name: finpocket_staging_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: finpocket_staging
+      POSTGRES_USER: finpocket_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    networks:
+      - finpocket_staging_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finpocket_user -d finpocket_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. FinPocket Backend API Service (Staging)
+  finpocket-api:
+    build:
+      context: ./finpocket_server
+      dockerfile: Dockerfile
+    container_name: finpocket_staging_api
+    restart: unless-stopped
+    depends_on:
+      finpocket-postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=staging
+      - PORT=3001
+      - DATABASE_URL=postgresql://finpocket_user@finpocket-postgres:5432/finpocket_staging
+      - ACCESS_TOKEN_EXPIRY=15m
+      - REFRESH_TOKEN_EXPIRY=7d
+      - CORS_ORIGIN=https://staging.finpocket.com
+      - LOG_LEVEL=INFO
+      - FINPOCKET_DEMO_MODE=false
+      - USE_MOCK_FINANCIAL_PROVIDER=false
+    secrets:
+      - jwt_secret
+      - db_password
+    volumes:
+      - finpocket_staging_data:/app/data
+    networks:
+      - finpocket_staging_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3001/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_staging_data:
+    driver: local
+  finpocket_staging_data:
+    driver: local
+
+networks:
+  finpocket_staging_net:
+    driver: bridge
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
