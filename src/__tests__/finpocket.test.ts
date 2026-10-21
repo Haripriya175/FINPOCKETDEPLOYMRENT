@@ -11,14 +11,13 @@ describe('FinPocket Core Services & Security Unit Tests', () => {
     StorageService.initialize();
   });
 
-  it('1. should initialize default user and bank accounts correctly', () => {
+  it('1. should keep a new account free of seeded bank data', () => {
     const user = StorageService.getUser();
     expect(user.fullName).toBe('Jithendra Sureddy');
     expect(user.email).toBe('jithendra@finpocket.com');
 
     const accounts = StorageService.getBankAccounts();
-    expect(accounts.length).toBeGreaterThan(0);
-    expect(accounts[0].bankName).toBe('HDFC Bank');
+    expect(accounts).toEqual([]);
   });
 
   it('2. should verify PIN and generate idempotency keys', async () => {
@@ -117,11 +116,7 @@ describe('FinPocket Core Services & Security Unit Tests', () => {
 
   it('8. should manage budgets, enforce limits, and calculate warning thresholds', () => {
     const budgets = StorageService.getBudgets();
-    expect(budgets.length).toBeGreaterThan(0);
-
-    const foodBudget = budgets.find(b => b.category === 'Food');
-    expect(foodBudget).toBeDefined();
-    expect(foodBudget?.limitAmount).toBeGreaterThan(0);
+    expect(budgets).toEqual([]);
 
     // Create a new budget
     const newBudgets = [

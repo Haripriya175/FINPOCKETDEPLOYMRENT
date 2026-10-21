@@ -234,11 +234,17 @@ async function runEmailOtpSuite() {
     } as any);
 
     const failEmail = `smtp_fail_${Date.now()}@finpocket.test`;
+    // The local .env may enable development OTP exposure. Disable that
+    // development-only fallback so this case exercises fail-closed delivery.
+    const previousExposeOtp = process.env.DEV_EXPOSE_OTP;
+    process.env.DEV_EXPOSE_OTP = 'false';
     const resFail = await fetch(`${baseUrl}/auth/email/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: failEmail }),
     });
+    if (previousExposeOtp === undefined) delete process.env.DEV_EXPOSE_OTP;
+    else process.env.DEV_EXPOSE_OTP = previousExposeOtp;
     assert.equal(resFail.status, 500);
     const failBody: any = await resFail.json();
     assert.match(failBody.error, /Failed to deliver/);
