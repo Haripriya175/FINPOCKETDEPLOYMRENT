@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FinPocket</string>
+    <string name="facebook_app_id">1952085422418539</string>
+    <string name="fb_login_protocol_scheme">fb1952085422418539</string>
+    <string name="facebook_client_token">013926c0659998b48503cef5230fb904</string>
+</resources>

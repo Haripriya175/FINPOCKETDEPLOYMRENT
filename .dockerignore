@@ -1,0 +1,32 @@
+# Local environment files and secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Host dependencies and build artifacts
+**/node_modules
+**/dist
+**/build
+**/coverage
+
+# Flutter and mobile assets
+finpocket_app/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Database data and test artifacts
+**/data/*.sqlite*
+**/*.sqlite
+**/*.db
+**/*.log
+
+# Reports and scratch files
+**/*.md
+**/scratch/
+**/src/scratch_*
+
+# Version control and IDE
+.git/
+.idea/
+.vscode/

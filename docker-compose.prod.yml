@@ -1,0 +1,100 @@
+version: '3.8'
+
+# ==============================================================================
+# FinPocket Production Docker Compose Configuration
+# ==============================================================================
+
+services:
+  # 1. Production PostgreSQL 18 Relational Store
+  finpocket-postgres-prod:
+    image: postgres:18-alpine
+    container_name: finpocket_prod_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: finpocket_production
+      POSTGRES_USER: finpocket_prod_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/prod_db_password
+    secrets:
+      - prod_db_password
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    networks:
+      - finpocket_prod_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finpocket_prod_admin -d finpocket_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # 2. FinPocket Backend API Service (Production)
+  finpocket-api-prod:
+    build:
+      context: ./finpocket_server
+      dockerfile: Dockerfile
+    container_name: finpocket_prod_api
+    restart: always
+    depends_on:
+      finpocket-postgres-prod:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://finpocket_prod_admin@finpocket-postgres-prod:5432/finpocket_production
+      - ACCESS_TOKEN_EXPIRY=15m
+      - REFRESH_TOKEN_EXPIRY=7d
+      - CORS_ORIGIN=https://app.finpocket.com
+      - LOG_LEVEL=WARN
+      - FINPOCKET_DEMO_MODE=false
+      - USE_MOCK_FINANCIAL_PROVIDER=false
+      - SETU_ENVIRONMENT=PRODUCTION
+      - SETU_API_BASE_URL=https://fiu.setu.co
+    secrets:
+      - prod_jwt_secret
+      - prod_db_password
+      - prod_setu_client_secret
+    volumes:
+      - finpocket_prod_data:/app/data
+    networks:
+      - finpocket_prod_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3001/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  postgres_prod_data:
+    driver: local
+  finpocket_prod_data:
+    driver: local
+
+networks:
+  finpocket_prod_net:
+    driver: bridge
+
+secrets:
+  prod_db_password:
+    external: true
+  prod_jwt_secret:
+    external: true
+  prod_setu_client_secret:
+    external: true

@@ -1,0 +1,53 @@
+{
+  "name": "finpocket-server",
+  "version": "1.0.0",
+  "description": "FinPocket Secure Financial Backend API",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "node scripts/dev.mjs",
+    "test": "tsx src/tests/google_sso_verification.test.ts && tsx src/tests/email_otp_verification.test.ts && tsx src/tests/mobile_otp_verification.test.ts && tsx src/tests/otp_security_regression.test.ts && tsx src/tests/security_audit.test.ts && tsx src/tests/phase2_financial_intelligence.test.ts && tsx src/tests/phase3_financial_intelligence.test.ts && tsx src/tests/phase4_production_hardening.test.ts && tsx src/tests/phase5_provider_architecture.test.ts && tsx src/tests/phase5b_security_verification.test.ts && tsx src/tests/phase6_sandbox_integration.test.ts && tsx src/tests/setu_callback_integration.test.ts && tsx src/tests/docker_production_verification.test.ts",
+    "db:provision": "tsx src/scripts/provision_db.ts",
+    "db:migrate": "tsx src/scripts/migrate_db.ts",
+    "test:sso": "tsx src/tests/google_sso_verification.test.ts",
+    "test:otp": "tsx src/tests/email_otp_verification.test.ts",
+    "test:sms": "tsx src/tests/mobile_otp_verification.test.ts",
+    "test:security": "tsx src/tests/otp_security_regression.test.ts",
+    "test:phase5c": "tsx src/tests/phase5c_postgresql_integration.test.ts",
+    "test:phase6": "tsx src/tests/phase6_sandbox_integration.test.ts",
+    "test:setu": "tsx src/tests/setu_callback_integration.test.ts",
+    "test:docker": "tsx src/tests/docker_production_verification.test.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.3.1",
+    "google-auth-library": "^11.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.1.0",
+    "nodemailer": "^10.1.1",
+    "pg": "^8.23.0",
+    "sqlite3": "^5.1.7",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.8",
+    "@types/node": "^22.13.9",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/sqlite3": "^3.1.11",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  },
+  "allowScripts": {
+    "sqlite3@5.1.7": true
+  }
+}
