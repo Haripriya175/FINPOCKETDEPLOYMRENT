@@ -59,7 +59,7 @@ const COMMON_WEAK_PASSWORDS = new Set([
     'qwerty', 'qwerty123', 'welcome', 'welcome123', 'finpocket', 'finpocket123',
     'letmein', 'monkey', 'dragon', 'football', 'master', 'sunshine', 'iloveyou'
 ]);
-function validatePasswordPolicy(password, userDetails) {
+function validatePasswordPolicy(password, userDetails, options = {}) {
     const errors = [];
     let score = 0;
     if (!password || typeof password !== 'string') {
@@ -110,7 +110,7 @@ function validatePasswordPolicy(password, userDetails) {
             }
         }
     }
-    if (userDetails?.email && userDetails.email.includes('@')) {
+    if (!options.allowEmailUsername && userDetails?.email && userDetails.email.includes('@')) {
         const emailPrefix = userDetails.email.split('@')[0].toLowerCase();
         if (emailPrefix.length >= 3 && password.toLowerCase().includes(emailPrefix)) {
             errors.push('Password cannot contain your email username.');

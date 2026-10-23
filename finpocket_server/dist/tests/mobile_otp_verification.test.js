@@ -11,8 +11,10 @@ const database_js_1 = require("../config/database.js");
 const sms_service_js_1 = require("../services/sms/sms.service.js");
 const mock_sms_provider_js_1 = require("../services/sms/mock_sms.provider.js");
 const security_validator_js_1 = require("../utils/security.validator.js");
+const turnstile_test_helper_js_1 = require("./turnstile_test_helper.js");
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_32_characters_minimum_len!';
+(0, turnstile_test_helper_js_1.installTurnstileTestMock)();
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use('/auth', auth_routes_js_1.default);
@@ -82,7 +84,7 @@ async function runMobileOtpSuite() {
         const res3 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone1 }),
+            body: JSON.stringify({ phone: testPhone1, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res3.status, 200);
         const body3 = await res3.json();
@@ -114,7 +116,7 @@ async function runMobileOtpSuite() {
         const res5 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone1 }),
+            body: JSON.stringify({ phone: testPhone1, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res5.status, 429);
         const body5 = await res5.json();
@@ -175,7 +177,7 @@ async function runMobileOtpSuite() {
         await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone2 }),
+            body: JSON.stringify({ phone: testPhone2, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const sentOtp2 = mockSms.getLastSentOtp(testPhone2);
         const res8 = await fetch(`${baseUrl}/auth/phone/verify-otp`, {
@@ -211,7 +213,7 @@ async function runMobileOtpSuite() {
         await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone3 }),
+            body: JSON.stringify({ phone: testPhone3, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const sentOtp3 = mockSms.getLastSentOtp(testPhone3);
         // Manually backdate expiration in DB
@@ -235,7 +237,7 @@ async function runMobileOtpSuite() {
         const res11 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone4 }),
+            body: JSON.stringify({ phone: testPhone4, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res11.status, 500);
         const body11 = await res11.json();
@@ -250,7 +252,7 @@ async function runMobileOtpSuite() {
         await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone5 }),
+            body: JSON.stringify({ phone: testPhone5, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const sentOtp5 = mockSms.getLastSentOtp(testPhone5);
         const verifyAttempts = await Promise.all([1, 2, 3, 4, 5].map(() => fetch(`${baseUrl}/auth/phone/verify-otp`, {
@@ -279,7 +281,7 @@ async function runMobileOtpSuite() {
         const res13Send = await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: testPhone6, userId: legitUserId }),
+            body: JSON.stringify({ phone: testPhone6, userId: legitUserId, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res13Send.status, 200);
         const sentOtp6 = mockSms.getLastSentOtp(testPhone6);
@@ -313,7 +315,7 @@ async function runMobileOtpSuite() {
         await fetch(`${baseUrl}/auth/email/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: regEmail }),
+            body: JSON.stringify({ email: regEmail, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const emailRecord = await (0, database_js_1.getQuery)('SELECT id FROM otp_verifications WHERE destination = ? AND purpose = ?', [regEmail, 'REGISTRATION_EMAIL']);
         await (0, database_js_1.runQuery)('UPDATE otp_verifications SET consumed_at = ? WHERE id = ?', [
@@ -329,6 +331,7 @@ async function runMobileOtpSuite() {
                 email: regEmail,
                 password: 'Password@12345!',
                 phone: regPhone,
+                captchaToken: turnstile_test_helper_js_1.testTurnstileToken,
             }),
         });
         assert_1.strict.equal(res14Block.status, 400);
@@ -338,7 +341,7 @@ async function runMobileOtpSuite() {
         await fetch(`${baseUrl}/auth/phone/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: regPhone }),
+            body: JSON.stringify({ phone: regPhone, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const regPhoneOtp = mockSms.getLastSentOtp(regPhone);
         const res14Verify = await fetch(`${baseUrl}/auth/phone/verify-otp`, {
@@ -356,6 +359,7 @@ async function runMobileOtpSuite() {
                 email: regEmail,
                 password: 'Password@12345!',
                 phone: regPhone,
+                captchaToken: turnstile_test_helper_js_1.testTurnstileToken,
             }),
         });
         assert_1.strict.equal(res14Success.status, 201);
@@ -388,7 +392,7 @@ async function runMobileOtpSuite() {
         const res15 = await fetch(`${baseUrl}/auth/otp/resend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE' }),
+            body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE', captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res15.status, 200);
         const body15 = await res15.json();
@@ -400,7 +404,7 @@ async function runMobileOtpSuite() {
         const res15Cooldown = await fetch(`${baseUrl}/auth/otp/resend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE' }),
+            body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE', captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res15Cooldown.status, 429);
         console.log('  ✅ [PASS] 15. Universal resend endpoint delivers phone SMS code with cooldown protection');

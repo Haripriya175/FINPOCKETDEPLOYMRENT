@@ -7,9 +7,11 @@ import { SmsService } from '../services/sms/sms.service.js';
 import { MockSmsProvider } from '../services/sms/mock_sms.provider.js';
 import { OtpService } from '../services/otp.service.js';
 import { normalizeIndianPhoneNumber } from '../utils/security.validator.js';
+import { installTurnstileTestMock, testTurnstileToken } from './turnstile_test_helper.js';
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_32_characters_minimum_len!';
+installTurnstileTestMock();
 
 const app = express();
 app.use(express.json());
@@ -91,7 +93,7 @@ async function runMobileOtpSuite() {
     const res3 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone1 }),
+      body: JSON.stringify({ phone: testPhone1, captchaToken: testTurnstileToken }),
     });
     assert.equal(res3.status, 200);
     const body3: any = await res3.json();
@@ -129,7 +131,7 @@ async function runMobileOtpSuite() {
     const res5 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone1 }),
+      body: JSON.stringify({ phone: testPhone1, captchaToken: testTurnstileToken }),
     });
     assert.equal(res5.status, 429);
     const body5: any = await res5.json();
@@ -195,7 +197,7 @@ async function runMobileOtpSuite() {
     await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone2 }),
+      body: JSON.stringify({ phone: testPhone2, captchaToken: testTurnstileToken }),
     });
     const sentOtp2 = mockSms.getLastSentOtp(testPhone2)!;
 
@@ -238,7 +240,7 @@ async function runMobileOtpSuite() {
     await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone3 }),
+      body: JSON.stringify({ phone: testPhone3, captchaToken: testTurnstileToken }),
     });
     const sentOtp3 = mockSms.getLastSentOtp(testPhone3)!;
 
@@ -269,7 +271,7 @@ async function runMobileOtpSuite() {
     const res11 = await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone4 }),
+      body: JSON.stringify({ phone: testPhone4, captchaToken: testTurnstileToken }),
     });
     assert.equal(res11.status, 500);
     const body11: any = await res11.json();
@@ -285,7 +287,7 @@ async function runMobileOtpSuite() {
     await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone5 }),
+      body: JSON.stringify({ phone: testPhone5, captchaToken: testTurnstileToken }),
     });
     const sentOtp5 = mockSms.getLastSentOtp(testPhone5)!;
 
@@ -322,7 +324,7 @@ async function runMobileOtpSuite() {
     const res13Send = await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: testPhone6, userId: legitUserId }),
+      body: JSON.stringify({ phone: testPhone6, userId: legitUserId, captchaToken: testTurnstileToken }),
     });
     assert.equal(res13Send.status, 200);
     const sentOtp6 = mockSms.getLastSentOtp(testPhone6)!;
@@ -360,7 +362,7 @@ async function runMobileOtpSuite() {
     await fetch(`${baseUrl}/auth/email/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: regEmail }),
+      body: JSON.stringify({ email: regEmail, captchaToken: testTurnstileToken }),
     });
     const emailRecord = await getQuery<any>(
       'SELECT id FROM otp_verifications WHERE destination = ? AND purpose = ?',
@@ -380,6 +382,7 @@ async function runMobileOtpSuite() {
         email: regEmail,
         password: 'Password@12345!',
         phone: regPhone,
+        captchaToken: testTurnstileToken,
       }),
     });
     assert.equal(res14Block.status, 400);
@@ -390,7 +393,7 @@ async function runMobileOtpSuite() {
     await fetch(`${baseUrl}/auth/phone/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: regPhone }),
+      body: JSON.stringify({ phone: regPhone, captchaToken: testTurnstileToken }),
     });
     const regPhoneOtp = mockSms.getLastSentOtp(regPhone)!;
     const res14Verify = await fetch(`${baseUrl}/auth/phone/verify-otp`, {
@@ -409,6 +412,7 @@ async function runMobileOtpSuite() {
         email: regEmail,
         password: 'Password@12345!',
         phone: regPhone,
+        captchaToken: testTurnstileToken,
       }),
     });
     assert.equal(res14Success.status, 201);
@@ -444,7 +448,7 @@ async function runMobileOtpSuite() {
     const res15 = await fetch(`${baseUrl}/auth/otp/resend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE' }),
+      body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE', captchaToken: testTurnstileToken }),
     });
     assert.equal(res15.status, 200);
     const body15: any = await res15.json();
@@ -457,7 +461,7 @@ async function runMobileOtpSuite() {
     const res15Cooldown = await fetch(`${baseUrl}/auth/otp/resend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE' }),
+      body: JSON.stringify({ destination: testPhone8, type: 'PHONE', purpose: 'REGISTRATION_PHONE', captchaToken: testTurnstileToken }),
     });
     assert.equal(res15Cooldown.status, 429);
     console.log('  ✅ [PASS] 15. Universal resend endpoint delivers phone SMS code with cooldown protection');

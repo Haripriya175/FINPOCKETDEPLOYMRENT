@@ -5,9 +5,11 @@ import authRoutes from '../routes/auth.routes.js';
 import { initDatabase, runQuery, getQuery } from '../config/database.js';
 import { EmailService } from '../services/email.service.js';
 import { OtpService } from '../services/otp.service.js';
+import { installTurnstileTestMock, testTurnstileToken } from './turnstile_test_helper.js';
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_32_characters_minimum_len!';
+installTurnstileTestMock();
 
 const app = express();
 app.use(express.json());
@@ -62,10 +64,35 @@ async function runEmailOtpSuite() {
     EmailService.clearSentMails();
     const testEmail1 = `verify_test_${Date.now()}@finpocket.test`;
 
-    const res2 = await fetch(`${baseUrl}/auth/email/send-otp`, {
+    const missingCaptcha = await fetch(`${baseUrl}/auth/email/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: testEmail1 }),
+    });
+    assert.equal(missingCaptcha.status, 400);
+
+    const rejectedCaptcha = await fetch(`${baseUrl}/auth/email/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testEmail1, captchaToken: 'invalid-test-token' }),
+    });
+    assert.equal(rejectedCaptcha.status, 400);
+
+    const configuredSecret = process.env.TURNSTILE_SECRET_KEY;
+    delete process.env.TURNSTILE_SECRET_KEY;
+    const missingConfiguration = await fetch(`${baseUrl}/auth/email/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testEmail1, captchaToken: testTurnstileToken }),
+    });
+    if (configuredSecret === undefined) delete process.env.TURNSTILE_SECRET_KEY;
+    else process.env.TURNSTILE_SECRET_KEY = configuredSecret;
+    assert.equal(missingConfiguration.status, 503);
+
+    const res2 = await fetch(`${baseUrl}/auth/email/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testEmail1, captchaToken: testTurnstileToken }),
     });
     assert.equal(res2.status, 200);
     const body2: any = await res2.json();
@@ -105,7 +132,7 @@ async function runEmailOtpSuite() {
     const res4 = await fetch(`${baseUrl}/auth/email/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: testEmail1 }),
+      body: JSON.stringify({ email: testEmail1, captchaToken: testTurnstileToken }),
     });
     assert.equal(res4.status, 429);
     const body4: any = await res4.json();
@@ -241,7 +268,7 @@ async function runEmailOtpSuite() {
     const resFail = await fetch(`${baseUrl}/auth/email/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: failEmail }),
+      body: JSON.stringify({ email: failEmail, captchaToken: testTurnstileToken }),
     });
     if (previousExposeOtp === undefined) delete process.env.DEV_EXPOSE_OTP;
     else process.env.DEV_EXPOSE_OTP = previousExposeOtp;
@@ -327,6 +354,7 @@ async function runEmailOtpSuite() {
         name: 'Unverified Tester',
         email: unverifiedEmail,
         password: 'ValidSecurePassword@123',
+        captchaToken: testTurnstileToken,
       }),
     });
     assert.equal(res13a.status, 400);
@@ -354,6 +382,7 @@ async function runEmailOtpSuite() {
         name: 'Verified Tester',
         email: unverifiedEmail,
         password: 'ValidSecurePassword@123',
+        captchaToken: testTurnstileToken,
       }),
     });
     assert.equal(res13b.status, 201);
@@ -388,7 +417,7 @@ async function runEmailOtpSuite() {
     const res15a = await fetch(`${baseUrl}/auth/otp/resend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destination: resendEmail, type: 'EMAIL' }),
+      body: JSON.stringify({ destination: resendEmail, type: 'EMAIL', captchaToken: testTurnstileToken }),
     });
     assert.equal(res15a.status, 200);
     const body15a: any = await res15a.json();
@@ -399,7 +428,7 @@ async function runEmailOtpSuite() {
     const res15b = await fetch(`${baseUrl}/auth/otp/resend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destination: resendEmail, type: 'EMAIL' }),
+      body: JSON.stringify({ destination: resendEmail, type: 'EMAIL', captchaToken: testTurnstileToken }),
     });
     assert.equal(res15b.status, 429);
     console.log('  ✅ [PASS] 15. Universal resend endpoint delivers code with cooldown protection');

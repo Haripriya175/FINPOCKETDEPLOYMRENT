@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../services/security_auth_service.dart';
-import '../../widgets/auth/captcha_widget.dart';
 import '../../widgets/auth/otp_verification_sheet.dart';
+import '../../widgets/auth/turnstile_captcha_widget.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -20,8 +20,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _captchaController = TextEditingController();
-  final GlobalKey<CaptchaWidgetState> _captchaKey = GlobalKey<CaptchaWidgetState>();
+  final GlobalKey<TurnstileCaptchaWidgetState> _captchaKey = GlobalKey<TurnstileCaptchaWidgetState>();
+  String? _captchaToken;
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -120,7 +120,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _captchaController.dispose();
     super.dispose();
   }
 
@@ -129,11 +128,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _localError = null;
     });
 
-    if (!_formKey.currentState!.validate() || !(_captchaKey.currentState?.isValid ?? false)) {
+    if (!_formKey.currentState!.validate() || _captchaToken == null) {
       setState(() {
-        _localError = 'Please solve the security captcha correctly.';
+        _localError = 'Please complete the security check before continuing.';
       });
-      _captchaKey.currentState?.refreshCaptcha();
       return;
     }
 
@@ -155,17 +153,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     // Seamless guided verification flow:
     if (!_isEmailVerified) {
-      final emailVerified = await _showEmailOtpModal();
+      final emailVerified = await _showEmailOtpModal(_captchaToken!);
       if (!emailVerified) {
         setState(() {
           _localError = 'Please verify your email address to complete registration.';
         });
         return;
       }
+      if (!mounted) return;
+      setState(() {
+        _localError = 'Email verified. Complete the new security check and submit again to create your account.';
+      });
+      return;
     }
 
     if (_phoneController.text.trim().isNotEmpty && !_isPhoneVerified) {
-      final phoneVerified = await _showPhoneOtpModal();
+      final phoneVerified = await _showPhoneOtpModal(_captchaToken!);
       if (!mounted) return;
       if (!phoneVerified) {
         setState(() {
@@ -173,9 +176,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
         return;
       }
+      setState(() {
+        _localError = 'Phone verified. Complete the new security check and submit again to create your account.';
+      });
+      return;
     }
 
     if (!mounted) return;
+    final registrationCaptchaToken = _captchaToken;
+    if (registrationCaptchaToken == null) {
+      setState(() {
+        _localError = 'Complete the security check before creating your account.';
+      });
+      return;
+    }
     final state = Provider.of<AppState>(context, listen: false);
     final nav = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -185,6 +199,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailController.text.trim(),
       _passwordController.text,
       phone: _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
+      captchaToken: registrationCaptchaToken,
     );
 
     if (!mounted) return;
@@ -200,7 +215,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       );
     } else {
-      _captchaKey.currentState?.refreshCaptcha();
+      await _captchaKey.currentState?.refreshCaptcha();
       setState(() {
         _localError = state.authError ?? 'Registration failed. Please check your information.';
       });
@@ -553,8 +568,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
+  Future<void> _requestEmailOtp() async {
+    final captchaToken = _captchaToken;
+    if (captchaToken == null) {
+      setState(() {
+        _localError = 'Complete the security check before requesting an email code.';
+      });
+      return;
+    }
+    final verified = await _showEmailOtpModal(captchaToken);
+    if (verified && mounted) {
+      setState(() {
+        _localError = 'Email verified. Complete the new security check, then submit to create your account.';
+      });
+    }
+  }
 
-  Future<bool> _showEmailOtpModal() async {
+  Future<bool> _showEmailOtpModal(String captchaToken) async {
     final email = _emailController.text.trim();
     if (email.isEmpty || !RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(email)) {
       setState(() {
@@ -576,7 +606,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _localError = null;
     });
 
-    final sendRes = await SecurityAuthService.sendEmailOtp(email);
+    final sendRes = await SecurityAuthService.sendEmailOtp(email, captchaToken);
+    if (mounted) await _captchaKey.currentState?.refreshCaptcha();
     if (!mounted) return false;
     setState(() {
       _isSendingEmailOtp = false;
@@ -596,6 +627,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       type: OtpVerificationType.email,
       destination: email,
       initialCooldownSeconds: cooldown,
+      initialCode: sendRes['developmentOtp'] as String?,
     );
 
     if (verified == true && mounted) {
@@ -614,7 +646,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return false;
   }
 
-  Future<bool> _showPhoneOtpModal() async {
+  Future<bool> _showPhoneOtpModal(String captchaToken) async {
     final phone = _phoneController.text.trim();
     final phoneValidation = SecurityAuthService.normalizeIndianPhone(phone);
     if (!phoneValidation.isValid) {
@@ -632,7 +664,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _localError = null;
     });
 
-    final sendRes = await SecurityAuthService.sendPhoneOtp(cleanPhone);
+    final sendRes = await SecurityAuthService.sendPhoneOtp(cleanPhone, captchaToken: captchaToken);
+    if (mounted) await _captchaKey.currentState?.refreshCaptcha();
     if (!mounted) return false;
     setState(() {
       _isSendingOtp = false;
@@ -874,7 +907,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                           )
                         : TextButton(
-                            onPressed: _isSendingEmailOtp ? null : _showEmailOtpModal,
+                            onPressed: _isSendingEmailOtp ? null : _requestEmailOtp,
                             child: _isSendingEmailOtp
                                 ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
                                 : const Text('Send OTP', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold, fontSize: 12)),
@@ -1098,9 +1131,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 16),
 
                 // Security Captcha Challenge
-                CaptchaWidget(
+                TurnstileCaptchaWidget(
                   key: _captchaKey,
-                  controller: _captchaController,
+                  siteKey: const String.fromEnvironment('TURNSTILE_SITE_KEY'),
+                  onTokenChanged: (token) {
+                    if (mounted) setState(() => _captchaToken = token);
+                  },
                 ),
                 const SizedBox(height: 20),
 

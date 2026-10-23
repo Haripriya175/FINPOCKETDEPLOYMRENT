@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Request, Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -20,6 +20,7 @@ import { AppleAuthService } from '../services/apple_auth.service.js';
 import { EmailService } from '../services/email.service.js';
 import { SmsService } from '../services/sms/sms.service.js';
 import { OtpService } from '../services/otp.service.js';
+import { verifyTurnstileToken } from '../services/turnstile.service.js';
 
 const router = Router();
 
@@ -63,15 +64,31 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+async function requireSignupCaptcha(req: Request, res: Response, token: unknown): Promise<boolean> {
+  // In the explicitly enabled local OTP demo, the web app presents a local
+  // checkbox and doesn't depend on Cloudflare or network access.
+  if (config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true') return true;
+
+  const verification = await verifyTurnstileToken(token, req.ip);
+  if (verification.success) return true;
+
+  const unavailable = verification.reason === 'not_configured' || verification.reason === 'provider_unavailable';
+  res.status(unavailable ? 503 : 400).json({
+    error: unavailable
+      ? 'Security verification is temporarily unavailable. Please retry shortly.'
+      : 'Security verification failed. Please complete the CAPTCHA and try again.',
+  });
+  return false;
+}
+
 // 1. REGISTER
 router.post('/register', async (req, res: Response): Promise<void> => {
   try {
-    const { name, email, password, phone } = req.body;
+    const { name, email, password, phone, captchaToken } = req.body;
     if (!name || !email || !password) {
       res.status(400).json({ error: 'Name, email, and password are required.' });
       return;
     }
-
     // 1. Legitimate Email Verification (Block temporary/disposable domains)
     const cleanEmail = email.toLowerCase().trim();
     if (isDisposableEmail(cleanEmail)) {
@@ -80,6 +97,8 @@ router.post('/register', async (req, res: Response): Promise<void> => {
       });
       return;
     }
+    const localOtpDevelopment = config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+    if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken)) return;
 
     // 1b. Enforce Email OTP Verification
     const isEmailVerified = await OtpService.isEmailVerifiedForRegistration(cleanEmail);
@@ -112,7 +131,11 @@ router.post('/register', async (req, res: Response): Promise<void> => {
     }
 
     // 2. Strong Password Policy Enforcement
-    const policy = validatePasswordPolicy(password, { name, email });
+    const policy = validatePasswordPolicy(password, { name, email }, {
+      // Local OTP demo users can use their chosen password even if it includes
+      // their email username; production keeps the full personal-info check.
+      allowEmailUsername: config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true',
+    });
     if (!policy.isValid) {
       res.status(400).json({
         error: policy.errors[0],
@@ -681,7 +704,7 @@ router.post('/pin/verify', authMiddleware, async (req: AuthRequest, res: Respons
 // 9. PHONE AUTH: SEND OTP (6-digit verification code with rate limiting & SMS delivery)
 router.post('/phone/send-otp', async (req, res: Response): Promise<void> => {
   try {
-    const { phone } = req.body;
+    const { phone, captchaToken } = req.body;
     const phoneValidation = normalizeIndianPhoneNumber(phone);
     if (!phoneValidation.isValid || !phoneValidation.normalized) {
       res.status(400).json({
@@ -703,6 +726,7 @@ router.post('/phone/send-otp', async (req, res: Response): Promise<void> => {
 
     const bindUserId = authenticatedUserId || (typeof req.body.userId === 'string' && req.body.userId ? req.body.userId : null);
     const purpose = bindUserId ? 'UPDATE_PHONE' : 'REGISTRATION_PHONE';
+    if (!authenticatedUserId && !await requireSignupCaptcha(req, res, captchaToken)) return;
 
     const issueRes = await OtpService.issueOtp({
       destination: cleanPhone,
@@ -1327,7 +1351,7 @@ router.delete('/apple/unlink', authMiddleware, async (req: AuthRequest, res: Res
 // 21. EMAIL AUTH: SEND VERIFICATION OTP
 router.post('/email/send-otp', async (req, res: Response): Promise<void> => {
   try {
-    const { email } = req.body;
+    const { email, captchaToken } = req.body;
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       res.status(400).json({ error: 'Valid email address is required.' });
       return;
@@ -1340,6 +1364,8 @@ router.post('/email/send-otp', async (req, res: Response): Promise<void> => {
       });
       return;
     }
+    const localOtpDevelopment = config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+    if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken)) return;
 
     const issueRes = await OtpService.issueOtp({
       destination: cleanEmail,
@@ -1358,8 +1384,10 @@ router.post('/email/send-otp', async (req, res: Response): Promise<void> => {
       return;
     }
 
-    const delivered = await EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp!);
     const exposeOtpForLocalDevelopment = config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+    const delivered = exposeOtpForLocalDevelopment
+      ? false
+      : await EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp!);
     if (!delivered && !exposeOtpForLocalDevelopment) {
       res.status(500).json({ error: 'Failed to deliver verification code. Please try again later.' });
       return;
@@ -1417,7 +1445,7 @@ router.post('/email/verify-otp', async (req, res: Response): Promise<void> => {
 // 23. UNIVERSAL OTP RESEND
 router.post('/otp/resend', async (req, res: Response): Promise<void> => {
   try {
-    const { destination, type = 'EMAIL', purpose = 'REGISTRATION_EMAIL' } = req.body;
+    const { destination, type = 'EMAIL', purpose = 'REGISTRATION_EMAIL', captchaToken } = req.body;
     if (!destination || typeof destination !== 'string') {
       res.status(400).json({ error: 'Destination is required.' });
       return;
@@ -1429,6 +1457,8 @@ router.post('/otp/resend', async (req, res: Response): Promise<void> => {
         res.status(400).json({ error: 'Valid personal or business email address is required.' });
         return;
       }
+      const localOtpDevelopment = config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+      if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken)) return;
 
       const issueRes = await OtpService.issueOtp({
         destination: cleanEmail,
@@ -1447,15 +1477,19 @@ router.post('/otp/resend', async (req, res: Response): Promise<void> => {
         return;
       }
 
-      const delivered = await EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp!);
-      if (!delivered) {
+      const exposeOtpForLocalDevelopment = config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+      const delivered = exposeOtpForLocalDevelopment
+        ? false
+        : await EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp!);
+      if (!delivered && !exposeOtpForLocalDevelopment) {
         res.status(500).json({ error: 'Failed to deliver verification code. Please try again later.' });
         return;
       }
 
       res.json({
         success: true,
-        message: 'Verification code resent successfully.',
+        message: delivered ? 'Verification code resent successfully.' : 'Local development only: use the code shown below.',
+        ...(delivered ? {} : { developmentOtp: issueRes.otp }),
         expiresInSeconds: issueRes.expiresInSeconds,
         resendCooldownSeconds: issueRes.resendCooldownSeconds,
       });
@@ -1469,6 +1503,7 @@ router.post('/otp/resend', async (req, res: Response): Promise<void> => {
         return;
       }
       const cleanPhone = phoneValidation.normalized;
+      if (!await requireSignupCaptcha(req, res, captchaToken)) return;
 
       const issueRes = await OtpService.issueOtp({
         destination: cleanPhone,
@@ -1536,4 +1571,3 @@ router.get('/verification-status', authMiddleware, async (req: AuthRequest, res:
 });
 
 export default router;
-

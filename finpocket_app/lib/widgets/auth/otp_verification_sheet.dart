@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_theme.dart';
 import '../../services/security_auth_service.dart';
+import 'turnstile_captcha_widget.dart';
 
 enum OtpVerificationType {
   email,
@@ -15,6 +16,7 @@ class OtpVerificationSheet extends StatefulWidget {
   final String? maskedDestination;
   final int initialCooldownSeconds;
   final String? userId;
+  final String? initialCode;
 
   const OtpVerificationSheet({
     super.key,
@@ -23,6 +25,7 @@ class OtpVerificationSheet extends StatefulWidget {
     this.maskedDestination,
     this.initialCooldownSeconds = 30,
     this.userId,
+    this.initialCode,
   });
 
   static Future<bool?> show({
@@ -32,6 +35,7 @@ class OtpVerificationSheet extends StatefulWidget {
     String? maskedDestination,
     int initialCooldownSeconds = 30,
     String? userId,
+    String? initialCode,
   }) {
     return showModalBottomSheet<bool>(
       context: context,
@@ -46,6 +50,7 @@ class OtpVerificationSheet extends StatefulWidget {
         maskedDestination: maskedDestination,
         initialCooldownSeconds: initialCooldownSeconds,
         userId: userId,
+        initialCode: initialCode,
       ),
     );
   }
@@ -57,17 +62,21 @@ class OtpVerificationSheet extends StatefulWidget {
 class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
   final TextEditingController _otpController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final GlobalKey<TurnstileCaptchaWidgetState> _captchaKey = GlobalKey<TurnstileCaptchaWidgetState>();
 
   Timer? _countdownTimer;
+  String? _captchaToken;
   late int _resendSeconds;
   bool _isVerifying = false;
   bool _isResending = false;
   String? _errorMessage;
+  String? _developmentCode;
   int? _remainingAttempts;
 
   @override
   void initState() {
     super.initState();
+    _developmentCode = widget.initialCode;
     _resendSeconds = widget.initialCooldownSeconds > 0 ? widget.initialCooldownSeconds : 30;
     _startCountdown();
   }
@@ -155,6 +164,13 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
 
   Future<void> _handleResend() async {
     if (_resendSeconds > 0 || _isResending || _isVerifying) return;
+    final captchaToken = _captchaToken;
+    if (captchaToken == null) {
+      setState(() {
+        _errorMessage = 'Complete the security check before resending the code.';
+      });
+      return;
+    }
 
     setState(() {
       _isResending = true;
@@ -168,16 +184,19 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
           destination: widget.destination,
           type: 'EMAIL',
           purpose: 'REGISTRATION_EMAIL',
+          captchaToken: captchaToken,
         );
       } else {
         result = await SecurityAuthService.resendOtp(
           destination: widget.destination,
           type: 'PHONE',
           purpose: widget.userId != null ? 'UPDATE_PHONE' : 'REGISTRATION_PHONE',
+          captchaToken: captchaToken,
         );
       }
 
       if (!mounted) return;
+      await _captchaKey.currentState?.refreshCaptcha();
 
       setState(() {
         _isResending = false;
@@ -187,6 +206,7 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
         final cooldown = (result['resendCooldownSeconds'] as int?) ?? 30;
         setState(() {
           _resendSeconds = cooldown;
+          _developmentCode = result['developmentOtp'] as String?;
           _remainingAttempts = null;
           _errorMessage = null;
         });
@@ -213,6 +233,8 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
       }
     } catch (e) {
       if (!mounted) return;
+      await _captchaKey.currentState?.refreshCaptcha();
+      if (!mounted) return;
       setState(() {
         _isResending = false;
         _errorMessage = 'Network error while requesting code. Please retry.';
@@ -237,10 +259,11 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
         top: 24,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
           // Header Bar
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -280,7 +303,7 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
                 height: 1.4,
               ),
               children: [
-                const TextSpan(text: 'Please enter the 6-digit verification code sent to '),
+                TextSpan(text: _developmentCode == null ? 'Please enter the 6-digit verification code sent to ' : 'Enter the on-screen verification code for '),
                 TextSpan(
                   text: displayDestination,
                   style: const TextStyle(fontWeight: FontWeight.bold),
@@ -291,6 +314,25 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
           ),
 
           const SizedBox(height: 20),
+
+          if (_developmentCode != null && isEmail) ...[
+            Container(
+              key: const Key('development_otp_display'),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+              ),
+              child: Column(children: [
+                const Text('Your verification code', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                SelectableText(_developmentCode!, style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.bold, color: AppTheme.primary)),
+                const Text('Development mode', style: TextStyle(fontSize: 11)),
+              ]),
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // 6-Digit OTP Field
           TextField(
@@ -392,7 +434,15 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
           const SizedBox(height: 16),
 
           // Resend Cooldown Action
-          Center(
+            if (_resendSeconds == 0)
+              TurnstileCaptchaWidget(
+                key: _captchaKey,
+                siteKey: const String.fromEnvironment('TURNSTILE_SITE_KEY'),
+                onTokenChanged: (token) {
+                  if (mounted) setState(() => _captchaToken = token);
+                },
+              ),
+            Center(
             child: _isResending
                 ? const SizedBox(
                     height: 18,
@@ -418,8 +468,9 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

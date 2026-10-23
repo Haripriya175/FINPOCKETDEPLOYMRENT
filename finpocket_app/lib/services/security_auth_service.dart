@@ -260,11 +260,12 @@ class SecurityAuthService {
   // 4. EMAIL & PHONE OTP VERIFICATION
   // ==========================================
 
-  static Future<Map<String, dynamic>> sendEmailOtp(String email) async {
+  static Future<Map<String, dynamic>> sendEmailOtp(String email, String captchaToken) async {
     final cleanEmail = email.trim().toLowerCase();
     try {
       final res = await ApiService.postEndpointPublic('/auth/email/send-otp', {
         'email': cleanEmail,
+        'captchaToken': captchaToken,
       });
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data is Map<String, dynamic>) {
@@ -320,11 +321,16 @@ class SecurityAuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> sendPhoneOtp(String phone, {String? userId}) async {
+  static Future<Map<String, dynamic>> sendPhoneOtp(
+    String phone, {
+    String? userId,
+    required String captchaToken,
+  }) async {
     final cleanPhone = phone.trim().replaceAll(RegExp(r'\s+'), '');
     try {
       final res = await ApiService.postEndpointPublic('/auth/phone/send-otp', {
         'phone': cleanPhone,
+        'captchaToken': captchaToken,
         if (userId != null) 'userId': userId,
       });
       final data = jsonDecode(res.body);
@@ -391,6 +397,7 @@ class SecurityAuthService {
     required String destination,
     required String type,
     String? purpose,
+    String? captchaToken,
   }) async {
     try {
       final cleanDest = destination.trim();
@@ -398,6 +405,7 @@ class SecurityAuthService {
         'destination': cleanDest,
         'type': type,
         'purpose': purpose ?? (type == 'PHONE' ? 'REGISTRATION_PHONE' : 'REGISTRATION_EMAIL'),
+        if (captchaToken != null) 'captchaToken': captchaToken,
       });
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data is Map<String, dynamic>) {
@@ -406,6 +414,7 @@ class SecurityAuthService {
           'message': data['message'] ?? 'Verification code resent successfully.',
           'expiresInSeconds': data['expiresInSeconds'] ?? 300,
           'resendCooldownSeconds': data['resendCooldownSeconds'] ?? 30,
+          if (data['developmentOtp'] != null) 'developmentOtp': data['developmentOtp'].toString(),
           if (data['maskedPhone'] != null) 'maskedPhone': data['maskedPhone'],
         };
       }
@@ -717,5 +726,3 @@ class SecurityAuthService {
     }
   }
 }
-
-

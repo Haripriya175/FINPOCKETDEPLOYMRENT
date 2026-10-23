@@ -2402,7 +2402,7 @@ class AppState extends ChangeNotifier {
   }
 
 
-  Future<bool> register(String name, String email, String password, {String? phone}) async {
+  Future<bool> register(String name, String email, String password, {String? phone, required String captchaToken}) async {
     _isLoading = true;
     _authError = null;
     notifyListeners();
@@ -2411,7 +2411,7 @@ class AppState extends ChangeNotifier {
       // Defense-in-depth: wipe any previous user's cached data
       await clearAllLocalUserData();
 
-      final res = await ApiService.register(name, email, password, phone: phone);
+      final res = await ApiService.register(name, email, password, phone: phone, captchaToken: captchaToken);
       if (res['user'] != null) {
         _currentUser = User.fromJson(res['user']);
         _isDemoMode = false;

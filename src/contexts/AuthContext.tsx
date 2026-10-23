@@ -12,7 +12,14 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<boolean>;
   loginWithMeta: (accessToken?: string) => Promise<boolean>;
   loginWithGoogle: (idToken?: string) => Promise<boolean>;
-  register: (name: string, email: string, phone: string, pass: string, pin: string) => Promise<boolean>;
+  register: (
+    name: string,
+    email: string,
+    phone: string,
+    pass: string,
+    pin: string,
+    captchaToken: string,
+  ) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   logoutAllDevices: () => void;
   updateUser: (updates: Partial<User>) => void;
@@ -68,15 +75,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return false;
   };
 
-  const register = async (name: string, email: string, phone: string, pass: string, pin: string): Promise<boolean> => {
-    const result = await ApiService.registerAccount(name, email, phone, pass);
-    if (!result.success || !result.user) return false;
+  const register = async (
+    name: string,
+    email: string,
+    phone: string,
+    pass: string,
+    pin: string,
+    captchaToken: string,
+  ): Promise<{ success: boolean; message?: string }> => {
+    const result = await ApiService.registerAccount(name, email, phone, pass, captchaToken);
+    if (!result.success || !result.user) return { success: false, message: result.message };
     const pinHash = await CryptoService.hashPin(pin);
     const account = { ...result.user, pinHash, appPinEnabled: true };
     StorageService.setUser(account);
     setUserState(account);
     setToken(StorageService.getToken());
-    return true;
+    return { success: true };
   };
 
   const logout = () => {

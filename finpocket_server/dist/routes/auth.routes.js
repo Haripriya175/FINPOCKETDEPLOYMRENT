@@ -19,6 +19,7 @@ const apple_auth_service_js_1 = require("../services/apple_auth.service.js");
 const email_service_js_1 = require("../services/email.service.js");
 const sms_service_js_1 = require("../services/sms/sms.service.js");
 const otp_service_js_1 = require("../services/otp.service.js");
+const turnstile_service_js_1 = require("../services/turnstile.service.js");
 const router = (0, express_1.Router)();
 // In-memory brute-force attempt tracker: email -> { attempts, lockedUntil }
 const loginAttempts = new Map();
@@ -54,10 +55,26 @@ function sanitizeUser(user) {
 function hashToken(token) {
     return crypto_1.default.createHash('sha256').update(token).digest('hex');
 }
+async function requireSignupCaptcha(req, res, token) {
+    // In the explicitly enabled local OTP demo, the web app presents a local
+    // checkbox and doesn't depend on Cloudflare or network access.
+    if (app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true')
+        return true;
+    const verification = await (0, turnstile_service_js_1.verifyTurnstileToken)(token, req.ip);
+    if (verification.success)
+        return true;
+    const unavailable = verification.reason === 'not_configured' || verification.reason === 'provider_unavailable';
+    res.status(unavailable ? 503 : 400).json({
+        error: unavailable
+            ? 'Security verification is temporarily unavailable. Please retry shortly.'
+            : 'Security verification failed. Please complete the CAPTCHA and try again.',
+    });
+    return false;
+}
 // 1. REGISTER
 router.post('/register', async (req, res) => {
     try {
-        const { name, email, password, phone } = req.body;
+        const { name, email, password, phone, captchaToken } = req.body;
         if (!name || !email || !password) {
             res.status(400).json({ error: 'Name, email, and password are required.' });
             return;
@@ -70,6 +87,9 @@ router.post('/register', async (req, res) => {
             });
             return;
         }
+        const localOtpDevelopment = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+        if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken))
+            return;
         // 1b. Enforce Email OTP Verification
         const isEmailVerified = await otp_service_js_1.OtpService.isEmailVerifiedForRegistration(cleanEmail);
         if (!isEmailVerified) {
@@ -98,7 +118,11 @@ router.post('/register', async (req, res) => {
             }
         }
         // 2. Strong Password Policy Enforcement
-        const policy = (0, security_validator_js_1.validatePasswordPolicy)(password, { name, email });
+        const policy = (0, security_validator_js_1.validatePasswordPolicy)(password, { name, email }, {
+            // Local OTP demo users can use their chosen password even if it includes
+            // their email username; production keeps the full personal-info check.
+            allowEmailUsername: app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true',
+        });
         if (!policy.isValid) {
             res.status(400).json({
                 error: policy.errors[0],
@@ -590,7 +614,7 @@ router.post('/pin/verify', auth_middleware_js_1.authMiddleware, async (req, res)
 // 9. PHONE AUTH: SEND OTP (6-digit verification code with rate limiting & SMS delivery)
 router.post('/phone/send-otp', async (req, res) => {
     try {
-        const { phone } = req.body;
+        const { phone, captchaToken } = req.body;
         const phoneValidation = (0, security_validator_js_1.normalizeIndianPhoneNumber)(phone);
         if (!phoneValidation.isValid || !phoneValidation.normalized) {
             res.status(400).json({
@@ -612,6 +636,8 @@ router.post('/phone/send-otp', async (req, res) => {
         }
         const bindUserId = authenticatedUserId || (typeof req.body.userId === 'string' && req.body.userId ? req.body.userId : null);
         const purpose = bindUserId ? 'UPDATE_PHONE' : 'REGISTRATION_PHONE';
+        if (!authenticatedUserId && !await requireSignupCaptcha(req, res, captchaToken))
+            return;
         const issueRes = await otp_service_js_1.OtpService.issueOtp({
             destination: cleanPhone,
             destinationType: 'PHONE',
@@ -1124,7 +1150,7 @@ router.delete('/apple/unlink', auth_middleware_js_1.authMiddleware, async (req, 
 // 21. EMAIL AUTH: SEND VERIFICATION OTP
 router.post('/email/send-otp', async (req, res) => {
     try {
-        const { email } = req.body;
+        const { email, captchaToken } = req.body;
         if (!email || typeof email !== 'string' || !email.includes('@')) {
             res.status(400).json({ error: 'Valid email address is required.' });
             return;
@@ -1136,6 +1162,9 @@ router.post('/email/send-otp', async (req, res) => {
             });
             return;
         }
+        const localOtpDevelopment = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+        if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken))
+            return;
         const issueRes = await otp_service_js_1.OtpService.issueOtp({
             destination: cleanEmail,
             destinationType: 'EMAIL',
@@ -1151,8 +1180,10 @@ router.post('/email/send-otp', async (req, res) => {
             });
             return;
         }
-        const delivered = await email_service_js_1.EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp);
         const exposeOtpForLocalDevelopment = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+        const delivered = exposeOtpForLocalDevelopment
+            ? false
+            : await email_service_js_1.EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp);
         if (!delivered && !exposeOtpForLocalDevelopment) {
             res.status(500).json({ error: 'Failed to deliver verification code. Please try again later.' });
             return;
@@ -1206,7 +1237,7 @@ router.post('/email/verify-otp', async (req, res) => {
 // 23. UNIVERSAL OTP RESEND
 router.post('/otp/resend', async (req, res) => {
     try {
-        const { destination, type = 'EMAIL', purpose = 'REGISTRATION_EMAIL' } = req.body;
+        const { destination, type = 'EMAIL', purpose = 'REGISTRATION_EMAIL', captchaToken } = req.body;
         if (!destination || typeof destination !== 'string') {
             res.status(400).json({ error: 'Destination is required.' });
             return;
@@ -1217,6 +1248,9 @@ router.post('/otp/resend', async (req, res) => {
                 res.status(400).json({ error: 'Valid personal or business email address is required.' });
                 return;
             }
+            const localOtpDevelopment = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+            if (!localOtpDevelopment && !await requireSignupCaptcha(req, res, captchaToken))
+                return;
             const issueRes = await otp_service_js_1.OtpService.issueOtp({
                 destination: cleanEmail,
                 destinationType: 'EMAIL',
@@ -1232,14 +1266,18 @@ router.post('/otp/resend', async (req, res) => {
                 });
                 return;
             }
-            const delivered = await email_service_js_1.EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp);
-            if (!delivered) {
+            const exposeOtpForLocalDevelopment = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true';
+            const delivered = exposeOtpForLocalDevelopment
+                ? false
+                : await email_service_js_1.EmailService.sendRegistrationOtp(cleanEmail, issueRes.otp);
+            if (!delivered && !exposeOtpForLocalDevelopment) {
                 res.status(500).json({ error: 'Failed to deliver verification code. Please try again later.' });
                 return;
             }
             res.json({
                 success: true,
-                message: 'Verification code resent successfully.',
+                message: delivered ? 'Verification code resent successfully.' : 'Local development only: use the code shown below.',
+                ...(delivered ? {} : { developmentOtp: issueRes.otp }),
                 expiresInSeconds: issueRes.expiresInSeconds,
                 resendCooldownSeconds: issueRes.resendCooldownSeconds,
             });
@@ -1252,6 +1290,8 @@ router.post('/otp/resend', async (req, res) => {
                 return;
             }
             const cleanPhone = phoneValidation.normalized;
+            if (!await requireSignupCaptcha(req, res, captchaToken))
+                return;
             const issueRes = await otp_service_js_1.OtpService.issueOtp({
                 destination: cleanPhone,
                 destinationType: 'PHONE',

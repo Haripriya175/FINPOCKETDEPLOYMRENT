@@ -186,12 +186,14 @@ class ApiService {
     String email,
     String password, {
     String? phone,
+    required String captchaToken,
   }) async {
     final response = await _postEndpoint('/auth/register', {
       'name': name.trim(),
       'email': email.trim().toLowerCase(),
       'password': password,
       'phone': phone?.trim() ?? '',
+      'captchaToken': captchaToken,
     });
 
     final data = jsonDecode(response.body);
@@ -457,9 +459,10 @@ class ApiService {
     await TokenManager.clearSession();
   }
 
-  static Future<Map<String, dynamic>> sendEmailOtp(String email) async {
+  static Future<Map<String, dynamic>> sendEmailOtp(String email, String captchaToken) async {
     final response = await _postEndpoint('/auth/email/send-otp', {
       'email': email.trim().toLowerCase(),
+      'captchaToken': captchaToken,
     });
     final data = jsonDecode(response.body);
     if (response.statusCode == 200) {

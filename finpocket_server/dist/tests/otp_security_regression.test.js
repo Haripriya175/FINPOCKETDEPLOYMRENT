@@ -12,8 +12,10 @@ const email_service_js_1 = require("../services/email.service.js");
 const sms_service_js_1 = require("../services/sms/sms.service.js");
 const otp_service_js_1 = require("../services/otp.service.js");
 const app_config_js_1 = require("../config/app_config.js");
+const turnstile_test_helper_js_1 = require("./turnstile_test_helper.js");
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_32_characters_minimum_len!';
+(0, turnstile_test_helper_js_1.installTurnstileTestMock)();
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use('/auth', auth_routes_js_1.default);
@@ -318,7 +320,7 @@ async function runOtpSecurityRegressionSuite() {
         const prodRes = await fetch(`${baseUrl}/auth/email/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: 'prod.security@finpocket.com' }),
+            body: JSON.stringify({ email: 'prod.security@finpocket.com', captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         const prodData = await prodRes.json();
         assert_1.strict.equal(prodRes.status, 200);

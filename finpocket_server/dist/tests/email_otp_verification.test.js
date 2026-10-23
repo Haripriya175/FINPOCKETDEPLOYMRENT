@@ -10,8 +10,10 @@ const auth_routes_js_1 = __importDefault(require("../routes/auth.routes.js"));
 const database_js_1 = require("../config/database.js");
 const email_service_js_1 = require("../services/email.service.js");
 const otp_service_js_1 = require("../services/otp.service.js");
+const turnstile_test_helper_js_1 = require("./turnstile_test_helper.js");
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_32_characters_minimum_len!';
+(0, turnstile_test_helper_js_1.installTurnstileTestMock)();
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use('/auth', auth_routes_js_1.default);
@@ -57,10 +59,34 @@ async function runEmailOtpSuite() {
         console.log('\n--- TEST 2: SUCCESSFUL OTP GENERATION & MOCK EMAIL DELIVERY ---');
         email_service_js_1.EmailService.clearSentMails();
         const testEmail1 = `verify_test_${Date.now()}@finpocket.test`;
-        const res2 = await fetch(`${baseUrl}/auth/email/send-otp`, {
+        const missingCaptcha = await fetch(`${baseUrl}/auth/email/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: testEmail1 }),
+        });
+        assert_1.strict.equal(missingCaptcha.status, 400);
+        const rejectedCaptcha = await fetch(`${baseUrl}/auth/email/send-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: testEmail1, captchaToken: 'invalid-test-token' }),
+        });
+        assert_1.strict.equal(rejectedCaptcha.status, 400);
+        const configuredSecret = process.env.TURNSTILE_SECRET_KEY;
+        delete process.env.TURNSTILE_SECRET_KEY;
+        const missingConfiguration = await fetch(`${baseUrl}/auth/email/send-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: testEmail1, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
+        });
+        if (configuredSecret === undefined)
+            delete process.env.TURNSTILE_SECRET_KEY;
+        else
+            process.env.TURNSTILE_SECRET_KEY = configuredSecret;
+        assert_1.strict.equal(missingConfiguration.status, 503);
+        const res2 = await fetch(`${baseUrl}/auth/email/send-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: testEmail1, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res2.status, 200);
         const body2 = await res2.json();
@@ -94,7 +120,7 @@ async function runEmailOtpSuite() {
         const res4 = await fetch(`${baseUrl}/auth/email/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: testEmail1 }),
+            body: JSON.stringify({ email: testEmail1, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res4.status, 429);
         const body4 = await res4.json();
@@ -206,11 +232,19 @@ async function runEmailOtpSuite() {
             },
         });
         const failEmail = `smtp_fail_${Date.now()}@finpocket.test`;
+        // The local .env may enable development OTP exposure. Disable that
+        // development-only fallback so this case exercises fail-closed delivery.
+        const previousExposeOtp = process.env.DEV_EXPOSE_OTP;
+        process.env.DEV_EXPOSE_OTP = 'false';
         const resFail = await fetch(`${baseUrl}/auth/email/send-otp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: failEmail }),
+            body: JSON.stringify({ email: failEmail, captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
+        if (previousExposeOtp === undefined)
+            delete process.env.DEV_EXPOSE_OTP;
+        else
+            process.env.DEV_EXPOSE_OTP = previousExposeOtp;
         assert_1.strict.equal(resFail.status, 500);
         const failBody = await resFail.json();
         assert_1.strict.match(failBody.error, /Failed to deliver/);
@@ -282,6 +316,7 @@ async function runEmailOtpSuite() {
                 name: 'Unverified Tester',
                 email: unverifiedEmail,
                 password: 'ValidSecurePassword@123',
+                captchaToken: turnstile_test_helper_js_1.testTurnstileToken,
             }),
         });
         assert_1.strict.equal(res13a.status, 400);
@@ -307,6 +342,7 @@ async function runEmailOtpSuite() {
                 name: 'Verified Tester',
                 email: unverifiedEmail,
                 password: 'ValidSecurePassword@123',
+                captchaToken: turnstile_test_helper_js_1.testTurnstileToken,
             }),
         });
         assert_1.strict.equal(res13b.status, 201);
@@ -338,7 +374,7 @@ async function runEmailOtpSuite() {
         const res15a = await fetch(`${baseUrl}/auth/otp/resend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destination: resendEmail, type: 'EMAIL' }),
+            body: JSON.stringify({ destination: resendEmail, type: 'EMAIL', captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res15a.status, 200);
         const body15a = await res15a.json();
@@ -348,7 +384,7 @@ async function runEmailOtpSuite() {
         const res15b = await fetch(`${baseUrl}/auth/otp/resend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destination: resendEmail, type: 'EMAIL' }),
+            body: JSON.stringify({ destination: resendEmail, type: 'EMAIL', captchaToken: turnstile_test_helper_js_1.testTurnstileToken }),
         });
         assert_1.strict.equal(res15b.status, 429);
         console.log('  ✅ [PASS] 15. Universal resend endpoint delivers code with cooldown protection');

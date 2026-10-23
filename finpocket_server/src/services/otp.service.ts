@@ -47,7 +47,10 @@ export interface VerifyOtpResult {
 }
 
 export class OtpService {
-  private static readonly OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly OTP_TTL_MS =
+    config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true'
+      ? 30 * 60 * 1000
+      : 5 * 60 * 1000;
   private static readonly RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
   private static readonly MAX_ATTEMPTS = 5;
 
@@ -153,7 +156,7 @@ export class OtpService {
     return {
       success: true,
       otp, // For internal delivery only
-      expiresInSeconds: 300,
+      expiresInSeconds: Math.ceil(this.OTP_TTL_MS / 1000),
       resendCooldownSeconds: 30,
     };
   }

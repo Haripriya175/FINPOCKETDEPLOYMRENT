@@ -9,7 +9,9 @@ const uuid_1 = require("uuid");
 const database_js_1 = require("../config/database.js");
 const app_config_js_1 = require("../config/app_config.js");
 class OtpService {
-    static OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+    static OTP_TTL_MS = app_config_js_1.config.environment === 'DEVELOPMENT' && process.env.DEV_EXPOSE_OTP === 'true'
+        ? 30 * 60 * 1000
+        : 5 * 60 * 1000;
     static RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
     static MAX_ATTEMPTS = 5;
     /**
@@ -83,7 +85,7 @@ class OtpService {
         return {
             success: true,
             otp, // For internal delivery only
-            expiresInSeconds: 300,
+            expiresInSeconds: Math.ceil(this.OTP_TTL_MS / 1000),
             resendCooldownSeconds: 30,
         };
     }

@@ -27,16 +27,16 @@ export const ApiService = {
     }
   },
 
-  async sendRegistrationOtp(email: string) {
-    return this.request('/auth/email/send-otp', { email });
+  async sendRegistrationOtp(email: string, captchaToken: string) {
+    return this.request('/auth/email/send-otp', { email, captchaToken });
   },
 
   async verifyRegistrationOtp(email: string, otp: string) {
     return this.request('/auth/email/verify-otp', { email, otp });
   },
 
-  async registerAccount(name: string, email: string, phone: string, password: string) {
-    const result = await this.request<any>('/auth/register', { name, email, phone, password });
+  async registerAccount(name: string, email: string, phone: string, password: string, captchaToken: string) {
+    const result = await this.request<any>('/auth/register', { name, email, phone, password, captchaToken });
     if (result.success && result.data?.token && result.data?.user) {
       const remote = result.data.user;
       const user: User = {

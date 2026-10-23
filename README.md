@@ -25,6 +25,40 @@ or Brevo). Email verification fails closed when no delivery service is configure
 Keep `.env` private and use a production PostgreSQL database and a strong
 `JWT_SECRET` before exposing the app publicly.
 
+For local development only, `NODE_ENV=DEVELOPMENT` and
+`DEV_EXPOSE_OTP=true` disable email delivery and show the generated verification
+code in the signup page. Never enable this setting outside local development.
+
+### Signup CAPTCHA (Cloudflare Turnstile)
+
+Account-registration email/SMS OTP requests, OTP resends, and account creation
+require a valid server-verified Turnstile token. Configure a Turnstile widget in the
+[Cloudflare dashboard](https://dash.cloudflare.com/?to=/:account/turnstile) and:
+
+1. Copy the root `.env.example` to `.env` and set `VITE_TURNSTILE_SITE_KEY` to
+   the widget's **site key** before starting/building the React web client.
+2. Copy `finpocket_server/.env.example` to `finpocket_server/.env` and set
+   `TURNSTILE_SECRET_KEY` to that widget's **secret key**. This secret stays on
+   the backend and must never use a `VITE_` prefix.
+3. For Flutter registration, build with
+   `--dart-define=TURNSTILE_SITE_KEY=<site-key>`. The mobile client sends its
+   token to the same verification endpoints; it never contains the secret.
+   The embedded mobile challenge uses the configured API origin, so allow that
+   production API hostname as well as the web host in the Turnstile widget.
+   Local development should use Turnstile's test keys with the configured local
+   API host.
+4. If the frontend host sets a Content Security Policy, allow
+   `https://challenges.cloudflare.com` in both `script-src` and `frame-src`.
+
+Local development uses Cloudflare's documented test credentials:
+site key `1x00000000000000000000AA` and secret
+`1x0000000000000000000000000000000AA`. These are provider test keys, not a
+server-side bypass: every signup and registration OTP request still calls
+Cloudflare Siteverify. Configure the local web site key in `.env`, the local
+backend secret in `finpocket_server/.env`, and pass the same site key to Flutter
+with `--dart-define`. Missing configuration, provider errors, expired tokens,
+and rejected tokens fail closed and can be retried from the form.
+
 This workspace's ignored local `.env` enables `DEV_EXPOSE_OTP=true` in
 `DEVELOPMENT` mode, so a verification code is shown in the signup form while
 testing locally. Remove that flag outside local development; production must

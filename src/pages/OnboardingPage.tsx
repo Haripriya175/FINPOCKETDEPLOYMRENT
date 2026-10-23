@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ApiService } from '../services/api';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 import { Shield, Sparkles, TrendingUp, Lock, FileText, ArrowRight, Check } from 'lucide-react';
 
 interface OnboardingPageProps {
@@ -44,6 +45,7 @@ const steps = [
 export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onComplete }) => {
   const { register, login } = useAuth();
   const { availableLanguages, language, setLanguage } = useLanguage();
+  const localOtpDevelopment = import.meta.env.DEV;
 
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [showRegisterForm, setShowRegisterForm] = useState<boolean>(false);
@@ -53,11 +55,17 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onComplete }) =>
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
   const [emailOtp, setEmailOtp] = useState('');
+  const [emailOtpVerified, setEmailOtpVerified] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [developmentOtp, setDevelopmentOtp] = useState('');
   const [loginMode, setLoginMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [localCaptchaPassed, setLocalCaptchaPassed] = useState(false);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -84,23 +92,65 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onComplete }) =>
       setError('PIN must be exactly 4 digits.');
       return;
     }
-
-    if (!otpSent) {
-      const result = await ApiService.sendRegistrationOtp(email.trim());
-      if (!result.success) { setError(result.message || 'Could not send verification code.'); return; }
-      setOtpSent(true);
-      setStatusMessage(result.message || `Verification code sent to ${email}.`);
-      setDevelopmentOtp((result.data as { developmentOtp?: string } | undefined)?.developmentOtp || '');
+    if (localOtpDevelopment && !localCaptchaPassed) {
+      setError('Complete the local security check before continuing.');
       return;
     }
-    if (!emailOtp.trim()) { setError('Enter the verification code sent to your email.'); return; }
-    const verification = await ApiService.verifyRegistrationOtp(email.trim(), emailOtp.trim());
-    if (!verification.success) { setError(verification.message || 'That verification code could not be confirmed.'); return; }
+    const localOtpFlow = !loginMode && otpSent && Boolean(developmentOtp);
+    if (!captchaToken && !localOtpDevelopment && !localOtpFlow) {
+      setError('Complete the security check before continuing.');
+      return;
+    }
 
-    const success = await register(fullName, email, '', password, pin);
-    if (success) {
-      onComplete();
-    } else setError('Account creation failed. Check your details and try again.');
+    setIsSubmitting(true);
+    let accountCreated = false;
+    try {
+      if (!otpSent) {
+        const result = await ApiService.sendRegistrationOtp(email.trim(), captchaToken);
+        if (!result.success) { setError(result.message || 'Could not send verification code.'); return; }
+        setOtpSent(true);
+        setStatusMessage(result.message || `Verification code sent to ${email}.`);
+        const localOtp = (result.data as { developmentOtp?: string } | undefined)?.developmentOtp || '';
+        setDevelopmentOtp(localOtp);
+        return;
+      }
+      if (!emailOtp.trim()) { setError('Enter the verification code sent to your email.'); return; }
+      if (!emailOtpVerified) {
+        const verification = await ApiService.verifyRegistrationOtp(email.trim(), emailOtp.trim());
+        if (!verification.success) {
+          // A code may have been consumed during a previous account-creation
+          // attempt. If this email already has an account, valid credentials
+          // should take the user straight to the dashboard.
+          const existingAccountLogin = await login(email, password);
+          if (existingAccountLogin) {
+            accountCreated = true;
+            onComplete();
+            return;
+          }
+          setError(verification.message || 'That verification code could not be confirmed.');
+          return;
+        }
+        // OTPs are single use. Preserve the successful verification so a
+        // correctable account-creation error does not make the code unusable.
+        setEmailOtpVerified(true);
+      }
+
+      const registration = await register(fullName, email, '', password, pin, captchaToken);
+      if (registration.success) {
+        accountCreated = true;
+      } else if (registration.message === 'An account with this email already exists.') {
+        const existingAccountLogin = await login(email, password);
+        if (existingAccountLogin) accountCreated = true;
+        else setError('An account already exists for this email. Sign in with its password or use another email address.');
+      } else setError(registration.message || 'Account creation failed. Check your details and try again.');
+    } finally {
+      setIsSubmitting(false);
+      if (!accountCreated) {
+        setCaptchaToken('');
+        setCaptchaResetKey(key => key + 1);
+      }
+    }
+    if (accountCreated) onComplete();
   };
 
   const StepIcon = steps[currentStep].icon;
@@ -211,18 +261,18 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onComplete }) =>
           </p>
 
           {error && (
-            <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '10px', borderRadius: '10px', fontSize: '12px', marginBottom: '14px' }}>
+            <div role="alert" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '10px', borderRadius: '10px', fontSize: '12px', marginBottom: '14px' }}>
               {error}
             </div>
           )}
           {statusMessage && (
-            <div style={{ background: 'rgba(20, 184, 166, 0.14)', color: '#99f6e4', padding: '10px', borderRadius: '10px', fontSize: '12px', marginBottom: '14px' }}>
+            <div role="status" aria-live="polite" style={{ background: 'rgba(20, 184, 166, 0.14)', color: '#99f6e4', padding: '10px', borderRadius: '10px', fontSize: '12px', marginBottom: '14px' }}>
               {statusMessage}
               {developmentOtp && <div style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '6px', marginTop: '8px' }}>{developmentOtp}</div>}
             </div>
           )}
 
-          <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <form ref={formRef} onSubmit={handleRegisterSubmit} aria-busy={isSubmitting} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {!loginMode && <div>
               <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Full Name</label>
               <input className="fp-input" value={fullName} onChange={e => setFullName(e.target.value)} required />
@@ -255,16 +305,48 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onComplete }) =>
 
             {!loginMode && otpSent && <div>
               <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Email verification code</label>
-              <input inputMode="numeric" autoComplete="one-time-code" className="fp-input" value={emailOtp} onChange={e => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} required />
-              <span style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginTop: '5px' }}>Enter the code sent to {email}.</span>
+              <input inputMode="numeric" autoComplete="one-time-code" className="fp-input" value={emailOtp} onChange={e => {
+                const code = e.target.value.replace(/\D/g, '').slice(0, 6);
+                setEmailOtp(code);
+                if (code.length === 6 && developmentOtp && !isSubmitting) {
+                  window.setTimeout(() => formRef.current?.requestSubmit(), 0);
+                }
+              }} required />
+              <span style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginTop: '5px' }}>
+                {developmentOtp ? 'Enter the local development code shown above to finish creating your account.' : `Enter the code sent to ${email}.`}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpSent(false);
+                  setEmailOtpVerified(false);
+                  setEmailOtp('');
+                  setStatusMessage('');
+                  setDevelopmentOtp('');
+                  setError(null);
+                  setCaptchaToken('');
+                  setCaptchaResetKey(key => key + 1);
+                }}
+                style={{ background: 'none', border: 0, color: '#5eead4', cursor: 'pointer', padding: '8px 0' }}
+              >
+                Request a new verification code
+              </button>
             </div>}
 
-            <button type="submit" className="btn-primary" style={{ marginTop: '12px' }}>
+            {!loginMode && localOtpDevelopment && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, border: '1px solid rgba(148, 163, 184, 0.4)', borderRadius: 10, color: '#e2e8f0', cursor: 'pointer' }}>
+                <input type="checkbox" checked={localCaptchaPassed} onChange={e => setLocalCaptchaPassed(e.target.checked)} />
+                <span>I'm not a robot <small style={{ display: 'block', color: '#94a3b8' }}>Local development security check</small></span>
+              </label>
+            )}
+            {!loginMode && !localOtpDevelopment && <TurnstileWidget onTokenChange={setCaptchaToken} resetKey={captchaResetKey} />}
+
+            <button type="submit" className="btn-primary" disabled={isSubmitting} style={{ marginTop: '12px', opacity: isSubmitting ? 0.7 : 1 }}>
               <Check size={18} />
-              <span>{loginMode ? 'Sign in' : otpSent ? 'Verify & create account' : 'Send verification code'}</span>
+              <span>{isSubmitting ? 'Please wait…' : loginMode ? 'Sign in' : otpSent ? 'Verify & create account' : 'Send verification code'}</span>
             </button>
 
-            <button type="button" onClick={() => { setLoginMode(!loginMode); setError(null); setOtpSent(false); setEmailOtp(''); setStatusMessage(''); setDevelopmentOtp(''); }} style={{ background: 'none', border: 0, color: '#5eead4', cursor: 'pointer', padding: 8 }}>
+            <button type="button" onClick={() => { setLoginMode(!loginMode); setError(null); setOtpSent(false); setEmailOtpVerified(false); setEmailOtp(''); setStatusMessage(''); setDevelopmentOtp(''); setCaptchaToken(''); setLocalCaptchaPassed(false); setCaptchaResetKey(key => key + 1); }} style={{ background: 'none', border: 0, color: '#5eead4', cursor: 'pointer', padding: 8 }}>
               {loginMode ? 'New to FinPocket? Create an account' : 'Already have an account? Sign in'}
             </button>
 

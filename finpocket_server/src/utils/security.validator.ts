@@ -62,7 +62,11 @@ export interface PasswordPolicyResult {
   errors: string[];
 }
 
-export function validatePasswordPolicy(password: string, userDetails?: { name?: string; email?: string }): PasswordPolicyResult {
+export function validatePasswordPolicy(
+  password: string,
+  userDetails?: { name?: string; email?: string },
+  options: { allowEmailUsername?: boolean } = {},
+): PasswordPolicyResult {
   const errors: string[] = [];
   let score = 0;
 
@@ -114,7 +118,7 @@ export function validatePasswordPolicy(password: string, userDetails?: { name?: 
     }
   }
 
-  if (userDetails?.email && userDetails.email.includes('@')) {
+  if (!options.allowEmailUsername && userDetails?.email && userDetails.email.includes('@')) {
     const emailPrefix = userDetails.email.split('@')[0].toLowerCase();
     if (emailPrefix.length >= 3 && password.toLowerCase().includes(emailPrefix)) {
       errors.push('Password cannot contain your email username.');
